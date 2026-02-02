@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Vocalis
+Comment=Voice to Text Assistant
+Exec=%HOME%/.local/bin/vocalis --gui
+Icon=microphone
+Type=Application
+Categories=Utility;Accessibility;
+X-GNOME-Autostart-enabled=true

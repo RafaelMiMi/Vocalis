@@ -1,0 +1,14 @@
+[Unit]
+Description=Vocalis - Voice to Text Assistant
+After=graphical-session.target
+
+[Service]
+ExecStart=%HOME%/.local/share/vocalis/venv/bin/python -m app.main --gui
+WorkingDirectory=%HOME%/.local/share/vocalis
+Restart=on-failure
+RestartSec=5
+Environment=DISPLAY=:0
+Environment=XDG_SESSION_TYPE=%XDG_SESSION_TYPE%
+
+[Install]
+WantedBy=graphical-session.target default.target
