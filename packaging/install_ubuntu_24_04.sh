@@ -8,6 +8,35 @@ BIN_DIR="$HOME/.local/bin"
 DESKTOP_DIR="$HOME/.local/share/applications"
 SYSTEMD_DIR="$HOME/.config/systemd/user"
 
+
+# 0. Check Dependencies
+REQUIRED_PKGS="python3-venv libportaudio2"
+
+if [ "$XDG_SESSION_TYPE" == "wayland" ]; then
+    REQUIRED_PKGS="$REQUIRED_PKGS wl-clipboard wtype"
+else
+    REQUIRED_PKGS="$REQUIRED_PKGS xdotool xsel"
+fi
+
+echo "Checking for missing packages..."
+MISSING_PKGS=""
+for pkg in $REQUIRED_PKGS; do
+    if ! dpkg -l | grep -q " $pkg "; then
+        MISSING_PKGS="$MISSING_PKGS $pkg"
+    fi
+done
+
+if [ -n "$MISSING_PKGS" ]; then
+    echo "Missing packages found: $MISSING_PKGS"
+    read -p "Install them now with sudo? [Y/n] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ || -z $REPLY ]]; then
+        sudo apt update && sudo apt install -y $MISSING_PKGS
+    else
+        echo "Warning: Vocalis may not work correctly without these packages."
+    fi
+fi
+
 # 1. Prepare Directory
 if [ -d "$INSTALL_DIR" ]; then
     echo "Updating existing installation..."

@@ -3,10 +3,12 @@ import logging
 logger = logging.getLogger(__name__)
 
 from core.llm import LLMClient
+from core.context import ContextManager
 
 class PromptEngine:
     def __init__(self, config_manager):
         self.config_manager = config_manager
+        self.context_manager = ContextManager(config_manager)
 
     def process(self, text: str, prompt_id: str) -> str:
         config = self.config_manager.get()
@@ -28,17 +30,15 @@ class PromptEngine:
             
         logger.info(f"Applying prompt '{prompt_id}'")
         
+        # Context Substitution
+        if "{clipboard}" in template:
+            clipboard_content = self.context_manager.get_clipboard()
+            template = template.replace("{clipboard}", clipboard_content)
+
         # Check if we should use AI
-        # We use AI if the provider is NOT local (implies we have an API key) or if explicitly forced?
-        # Actually, simpler: If we have an API key in config, let's try to use LLM for prompts that need it.
-        # But wait, 'Quick Dictate' shouldn't hit LLM unless requested.
-        # The prompt_id existence implies we want processing.
-        
-        # Check if simple template (just replacement) or complex
-        # For now, let's assume ALL prompts go through LLM *IF* an LLM is configured.
-        # IF NOT, we do string replacement.
-        
-        use_llm = config.transcription_provider in ["openai", "groq"] and config.api_key
+        # If we have an API key, we should use the LLM for prompts that require intelligence.
+        # This enables "Hybrid Mode": Local Whisper for transcription + OpenAI/Groq for processing.
+        use_llm = bool(config.api_key and config.api_key.strip())
         
         if use_llm:
             try:

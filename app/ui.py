@@ -1,33 +1,52 @@
 import sys
 import os
+import math
 import logging
 from PySide6.QtWidgets import (QApplication, QSystemTrayIcon, QMenu, QDialog, 
                                QVBoxLayout, QLabel, QComboBox, QDialogButtonBox, 
                                QFormLayout, QLineEdit, QCheckBox, QWidget, QProgressBar,
                                QTabWidget, QTextEdit, QListWidget, QPushButton, QHBoxLayout,
-                               QMessageBox)
-from PySide6.QtGui import QIcon, QAction, QPainter, QColor, QPen, QPixmap, QKeySequence
+                               QMessageBox, QDoubleSpinBox)
+from PySide6.QtGui import (QIcon, QAction, QPainter, QColor, QPen, QPainterPath, 
+                         QKeySequence, QFont, QPixmap)
 from PySide6.QtCore import Slot, QThread, Signal, Qt, QTimer, QPoint, QObject
 from core.config import ConfigManager, AppConfig
 from core.audio import AudioRecorder
 from core.history import HistoryManager
+from core.transcription import TranscriberFactory
 from core.prompt_engine import PromptEngine
+from core.processing import TextProcessor
+from core.dictionary import DictionaryManager
+from core.snippets import SnippetManager
+from core.profiles import ProfileManager
 from app.hotkeys import get_manager
 from app import output_actions
 from core.ipc import IPCServer
+from core.sounds import SoundManager
 import sounddevice as sd
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-def create_placeholder_icon():
+def create_placeholder_icon(color="#4A90E2"):
     pixmap = QPixmap(64, 64)
     pixmap.fill(QColor("transparent"))
     painter = QPainter(pixmap)
-    painter.setBrush(QColor("#4A90E2"))
+    painter.setRenderHint(QPainter.Antialiasing)
+    
+    # Circle
+    painter.setBrush(QColor(color))
+    painter.setPen(Qt.NoPen)
     painter.drawEllipse(2, 2, 60, 60)
+    
+    # "V" Text
     painter.setPen(QColor("white"))
-    painter.drawText(20, 35, "V")
+    font = painter.font()
+    font.setPixelSize(40)
+    font.setBold(True)
+    painter.setFont(font)
+    painter.drawText(0, 0, 64, 64, Qt.AlignCenter, "V")
+    
     painter.end()
     return QIcon(pixmap)
 
@@ -37,7 +56,7 @@ class VisualizerWindow(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.WindowDoesNotAcceptFocus)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.resize(300, 100)
@@ -85,6 +104,7 @@ class VisualizerWindow(QWidget):
         """)
 
     def on_btn_click(self):
+        logger.info(f"Visualizer button clicked. Mode: {self.mode}")
         if self.mode == "recording":
             self.stop_clicked.emit()
         else:
@@ -111,29 +131,56 @@ class VisualizerWindow(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         
-        # Pill Background
+        # Pill Background (Translucent Black)
         painter.setBrush(QColor(0, 0, 0, 180))
         painter.setPen(Qt.NoPen)
-        painter.drawRoundedRect(0, 0, self.width(), self.height(), 25, 25)
+        rect = self.rect()
+        painter.drawRoundedRect(rect, 25, 25)
         
-        # Visualizer Wave (only animate if recording)
-        painter.setPen(QPen(QColor("#4A90E2"), 3))
+        # Wave Animation
         center_y = self.height() // 2
+        width = self.width()
         
         if self.mode == "recording":
-            radius = 10 + (self.amplitude * 100)
-            if radius > self.height()/2 - 10: radius = self.height()/2 - 10
-        else:
-            # Pulse animation could go here, but static circle for processing is fine
-            radius = 15
+            # Dynamic Wave
+            # Use current time to phase shift the sine wave
+            import time
+            current_time = time.time() * 10
             
-        painter.setBrush(QColor("#4A90E2"))
-        painter.drawEllipse(QPoint(self.width()//2, center_y), int(radius), int(radius))
+            path = QPainterPath()
+            path.moveTo(0, center_y)
+            
+            # Amplitude Scaling
+            # self.amplitude is roughly 0.0 to 1.0 (though can be higher)
+            # We want max height to be ~40px
+            amp_scale = min(self.amplitude * 200, 40) 
+            if amp_scale < 2: amp_scale = 2 # Minimum movement
+            
+            # Draw Sine Wave
+            for x in range(0, width, 5):
+                norm_x = x / width
+                window = 4 * norm_x * (1 - norm_x) # 0->1->0
+                y_offset = math.sin((x * 0.1) + current_time) * amp_scale * window
+                path.lineTo(x, center_y + y_offset)
+            
+            painter.setPen(QPen(QColor("#4A90E2"), 3))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawPath(path)
+            
+        elif self.mode == "processing":
+            # Spinner / Pulse
+            import time
+            t = time.time() * 5
+            radius = 10 + math.sin(t) * 3
+            painter.setBrush(QColor("#4A90E2"))
+            painter.setPen(Qt.NoPen)
+            painter.drawEllipse(QPoint(int(width/2), center_y), int(radius), int(radius))
         
-        # Label
         painter.setPen(QColor("white"))
-        painter.drawText(60, 0, 180, 100, Qt.AlignCenter, self.message)
+        painter.drawText(rect, Qt.AlignCenter, self.message)
+        super().paintEvent(event) # Just in case
 
+        super().paintEvent(event) # Just in case
 class ResultEditor(QDialog):
     def __init__(self, text, parent=None):
         super().__init__(parent)
@@ -168,17 +215,23 @@ class ResultEditor(QDialog):
         self.accept()
 
 
+from core.processing import TextProcessor
+
+logger = logging.getLogger(__name__)
+
 class WorkerThread(QThread):
-    finished = Signal(str)
+    finished = Signal(str, dict)
     error = Signal(str)
     status_update = Signal(str)
-    audio_amplitude = Signal(float)
+    audio_amplitude = Signal(float) # Keep this for visualizer if needed elsewhere, though recording is moved
 
-    def __init__(self, config_manager, prompt_engine):
+    def __init__(self, config_manager, prompt_engine, text_processor):
         super().__init__()
         self.config_manager = config_manager
         self.prompt_engine = prompt_engine
+        self.text_processor = text_processor
         self.recorder = None
+        self._should_stop_recording = False # Flag for thread movement
 
     def run(self):
         try:
@@ -190,42 +243,63 @@ class WorkerThread(QThread):
             
             # 1. Record
             self.status_update.emit(f"Listening ({mode_name})...")
-            self.recorder = AudioRecorder(device_index=config.input_device)
             
+            # Helper to emit amplitude
             def stream_callback(data):
                 rms = np.sqrt(np.mean(data**2))
+                # logger.debug(f"RMS: {rms}") 
                 self.audio_amplitude.emit(float(rms))
-
-            path = self.recorder.record_once(max_duration=3600, stream_callback=stream_callback) # 1 hour max
             
+            # Initialize Recorder HERE (Background Thread)
+            logger.info("Initializing AudioRecorder...")
+            from core.audio import AudioRecorder
+            self.recorder = AudioRecorder(device_index=config.input_device)
+            
+            # Check if stop was pressed during init
+            if self._should_stop_recording:
+                logger.info("Stop flag set during init, aborting.")
+                self.finished.emit("", mode_data)
+                return
+
+            logger.info("Starting record_once...")
+            path = self.recorder.record_once(max_duration=3600, stream_callback=stream_callback)
+            logger.info(f"record_once returned: {path}")
+            
+            if not path or not os.path.exists(path):
+                self.finished.emit("", mode_data)
+                return
+
             # 2. Transcribe
             self.status_update.emit("Transcribing...")
             from core.transcription import TranscriberFactory
             transcriber = TranscriberFactory.get_transcriber(config)
             text = transcriber.transcribe(path, language=(None if config.language == 'auto' else config.language))
             
-            # 3. Apply Prompt (AI) using dict access since dynamic dict in config
-            prompt_id = mode_data.get("prompt_id")
-            if prompt_id:
-                self.status_update.emit("AI Processing...")
-                text = self.prompt_engine.process(text, prompt_id)
+            # 3. Process (AI + Dictionary + Snippets)
+            self.status_update.emit("Processing text...")
+            # Ensure mode_data is dict
+            if hasattr(mode_data, "name"): mode_data = asdict(mode_data)
+                
+            final_text = self.text_processor.process(text, mode_data)
+                
+            if os.path.exists(path):
+                os.unlink(path)
 
-            # 4. Output
-            output_action_type = mode_data.get("output_action", "clipboard")
-            file_path = mode_data.get("file_path")
-            
-            output_actions.execute(output_action_type, text, file_path=file_path)
-            
-            os.unlink(path)
-            self.finished.emit(text)
+            # 4. Finish
+            self.finished.emit(final_text, mode_data)
             
         except Exception as e:
             logger.error(f"Worker failed: {e}")
             self.error.emit(str(e))
 
     def stop_recording(self):
+        logger.info("WorkerThread stop_recording called")
+        self._should_stop_recording = True
         if self.recorder:
+            logger.info("Calling recorder.stop()")
             self.recorder.stop()
+        else:
+            logger.warning("Recorder not yet ready, set flag.")
 
 class HotkeyEdit(QLineEdit):
     def __init__(self, text="", parent=None):
@@ -282,6 +356,7 @@ class SettingsDialog(QDialog):
         self.resize(500, 400)
         self.config_manager = config_manager
         self.config = config_manager.get()
+        self.profile_manager = ProfileManager(config_manager)
         self.setup_ui()
 
     def setup_ui(self):
@@ -298,15 +373,52 @@ class SettingsDialog(QDialog):
         self._populate_devices()
         general_layout.addRow("Microphone:", self.device_combo)
         
-        self.hotkey_edit = HotkeyEdit(self.config.hotkey)
-        self.hotkey_edit.setToolTip("Click to record new hotkey (e.g., <ctrl>+<alt>+k)")
+        # Current Mode Selector
+        self.mode_selector = QComboBox()
+        # Populate with modes
+        for mid, mdata in self.config.modes.items():
+            name = mdata.get("name") if isinstance(mdata, dict) else mdata.name
+            self.mode_selector.addItem(name, mid)
+        # Set current
+        idx = self.mode_selector.findData(self.config.current_mode)
+        if idx >= 0:
+            self.mode_selector.setCurrentIndex(idx)
+        
+        self.mode_selector.currentIndexChanged.connect(self._on_settings_mode_changed)
+        general_layout.addRow("Active Mode:", self.mode_selector)
+
+        self.hotkey_edit = QLineEdit(self.config.hotkey)
+        self.hotkey_edit.setPlaceholderText("Click to set (e.g. <Super>space)")
+        self.hotkey_edit.setReadOnly(True) # Capture key presses
+        self.hotkey_edit.installEventFilter(self) # We need to implement eventFilter
+        
         general_layout.addRow("Global Hotkey:", self.hotkey_edit)
+
+        # Paste Delay
+        self.delay_spin = QDoubleSpinBox()
+        self.delay_spin.setRange(0.1, 5.0)
+        self.delay_spin.setSingleStep(0.1)
+        self.delay_spin.setValue(self.config.paste_delay)
+        self.delay_spin.setSuffix(" sec")
+        self.delay_spin.setToolTip("Delay before pasting to ensure headers/focus are correct.")
+        general_layout.addRow("Paste Delay:", self.delay_spin)
 
         # Autostart
         self.autostart_check = QCheckBox("Run on Startup")
         self.autostart_check.setChecked(self._check_autostart())
         self.autostart_check.toggled.connect(self._toggle_autostart)
         general_layout.addRow("", self.autostart_check)
+
+        # Show Visualizer
+        self.visualizer_check = QCheckBox("Show Visualizer Window")
+        self.visualizer_check.setChecked(self.config.show_visualizer)
+        general_layout.addRow("", self.visualizer_check)
+
+        # Clipboard Privacy
+        self.allow_clipboard_check = QCheckBox("Allow AI to read Clipboard")
+        self.allow_clipboard_check.setChecked(getattr(self.config, "allow_clipboard_access", True))
+        self.allow_clipboard_check.setToolTip("Enables {clipboard} placeholder in prompts.")
+        general_layout.addRow("", self.allow_clipboard_check)
         
         # Wayland Warning
         if os.environ.get("XDG_SESSION_TYPE") == "wayland":
@@ -379,11 +491,20 @@ class SettingsDialog(QDialog):
         self.m_action_combo.addItems(["clipboard", "paste", "file"])
         editor_layout.addRow("Action:", self.m_action_combo)
         
+        self.m_paste_method = QComboBox()
+        self.m_paste_method.addItems(["auto", "ctrl_v", "type", "copy_only"])
+        self.m_paste_method.setToolTip("Auto: Tries best method. Ctrl+V: Standard paste. Type: Types characters. Copy Only: No output.")
+        editor_layout.addRow("Paste Method:", self.m_paste_method)
+        
         self.m_path_edit = QLineEdit()
         self.m_path_edit.setPlaceholderText("/path/to/file.md (optional)")
         editor_layout.addRow("File Path:", self.m_path_edit)
 
         btn_layout = QHBoxLayout()
+        self.set_active_btn = QPushButton("Set as Active")
+        self.set_active_btn.clicked.connect(self._set_active_from_list)
+        self.set_active_btn.setStyleSheet("background-color: #4A90E2; color: white; font-weight: bold;")
+        
         self.add_mode_btn = QPushButton("New")
         self.add_mode_btn.clicked.connect(self._new_mode)
         self.save_mode_btn = QPushButton("Save Mode")
@@ -391,30 +512,20 @@ class SettingsDialog(QDialog):
         self.del_mode_btn = QPushButton("Delete")
         self.del_mode_btn.clicked.connect(self._delete_mode)
         
+        btn_layout.addWidget(self.set_active_btn)
         btn_layout.addWidget(self.add_mode_btn)
         btn_layout.addWidget(self.save_mode_btn)
         btn_layout.addWidget(self.del_mode_btn)
         editor_layout.addRow(btn_layout)
         
-        # Active Mode Selection
         modes_layout.addWidget(editor_widget, stretch=2)
         
-        # Add a bottom row for "Default/Active Mode"
-        main_layout_shim = QVBoxLayout()
-        main_layout_shim.addLayout(modes_layout)
+        self.modes_tab.setLayout(modes_layout)
         
-        active_layout = QHBoxLayout()
-        active_layout.addWidget(QLabel("Active Mode:"))
-        self.active_mode_combo = QComboBox()
-        active_layout.addWidget(self.active_mode_combo)
-        main_layout_shim.addLayout(active_layout)
-        
-        self.modes_tab.setLayout(main_layout_shim)
-        
-        self._refresh_prompt_combo()
         self._refresh_mode_list()
+        self._refresh_prompt_combo()
         
-        self.tabs.addTab(self.modes_tab, "Modes")
+        self.tabs.addTab(self.modes_tab, "Manage Modes")
 
         # Tab 4: Prompts
         self.prompts_tab = QWidget()
@@ -467,11 +578,150 @@ class SettingsDialog(QDialog):
         self._refresh_prompt_list()
         self.tabs.addTab(self.prompts_tab, "Prompts")
 
+        # Tab 5: Dictionary
+        self.dict_tab = QWidget()
+        dict_layout = QHBoxLayout(self.dict_tab)
+        
+        # Left: List
+        self.dict_list = QListWidget()
+        self.dict_list.currentRowChanged.connect(self._on_dict_selected)
+        dict_layout.addWidget(self.dict_list, stretch=1)
+        
+        # Right: Editor
+        editor_widget = QWidget()
+        editor_layout = QFormLayout(editor_widget)
+        
+        self.d_spoken_edit = QLineEdit()
+        self.d_spoken_edit.setPlaceholderText("Spoken phrase")
+        editor_layout.addRow("Spoken:", self.d_spoken_edit)
+        
+        self.d_written_edit = QLineEdit()
+        self.d_written_edit.setPlaceholderText("Replacement text")
+        editor_layout.addRow("Written:", self.d_written_edit)
+        
+        btn_layout = QHBoxLayout()
+        self.add_dict_btn = QPushButton("New")
+        self.add_dict_btn.clicked.connect(self._new_dict_entry)
+        self.save_dict_btn = QPushButton("Save")
+        self.save_dict_btn.clicked.connect(self._save_dict_entry)
+        self.del_dict_btn = QPushButton("Delete")
+        self.del_dict_btn.clicked.connect(self._delete_dict_entry)
+        
+        btn_layout.addWidget(self.add_dict_btn)
+        btn_layout.addWidget(self.save_dict_btn)
+        btn_layout.addWidget(self.del_dict_btn)
+        editor_layout.addRow(btn_layout)
+        
+        dict_layout.addWidget(editor_widget, stretch=2)
+        
+        self._refresh_dict_list()
+        self.tabs.addTab(self.dict_tab, "Dictionary")
+
+        # Tab 6: Snippets
+        self.snip_tab = QWidget()
+        snip_layout = QHBoxLayout(self.snip_tab)
+        
+        # Left: List
+        self.snip_list = QListWidget()
+        self.snip_list.currentRowChanged.connect(self._on_snip_selected)
+        snip_layout.addWidget(self.snip_list, stretch=1)
+        
+        # Right: Editor
+        editor_widget = QWidget()
+        editor_layout = QFormLayout(editor_widget)
+        
+        self.s_trigger_edit = QLineEdit()
+        self.s_trigger_edit.setPlaceholderText("Trigger phrase")
+        editor_layout.addRow("Trigger:", self.s_trigger_edit)
+        
+        self.s_replace_edit = QTextEdit() # Multi-line snippet
+        self.s_replace_edit.setPlaceholderText("Expanded text.\nSupports {date}, {time}")
+        editor_layout.addRow("Expansion:", self.s_replace_edit)
+        
+        btn_layout = QHBoxLayout()
+        self.add_snip_btn = QPushButton("New")
+        self.add_snip_btn.clicked.connect(self._new_snip_entry)
+        self.save_snip_btn = QPushButton("Save")
+        self.save_snip_btn.clicked.connect(self._save_snip_entry)
+        self.del_snip_btn = QPushButton("Delete")
+        self.del_snip_btn.clicked.connect(self._delete_snip_entry)
+        
+        btn_layout.addWidget(self.add_snip_btn)
+        btn_layout.addWidget(self.save_snip_btn)
+        btn_layout.addWidget(self.del_snip_btn)
+        editor_layout.addRow(btn_layout)
+        
+        snip_layout.addWidget(editor_widget, stretch=2)
+        
+        self._refresh_snip_list()
+        self.tabs.addTab(self.snip_tab, "Snippets")
+
+        # Tab 6: Profiles
+        self.profiles_tab = QWidget()
+        prof_layout = QHBoxLayout(self.profiles_tab)
+        
+        self.prof_list = QListWidget()
+        self.prof_list.currentRowChanged.connect(self._on_prof_selected)
+        prof_layout.addWidget(self.prof_list, stretch=1)
+        
+        prof_editor = QWidget()
+        prof_edit_layout = QFormLayout(prof_editor)
+        
+        self.p_rule_edit = QLineEdit()
+        self.p_rule_edit.setPlaceholderText("Window Title (e.g., 'Firefox')")
+        prof_edit_layout.addRow("App/Title:", self.p_rule_edit)
+
+        # Help Label
+        help_lbl = QLabel("If detection fails (e.g. Wayland), bind a system shortcut to:\n'vocalis --mode <ModeName>'")
+        help_lbl.setStyleSheet("color: gray; font-style: italic; font-size: 10px;")
+        prof_edit_layout.addRow("", help_lbl)
+        
+        self.p_mode_combo = QComboBox()
+        # Populate with modes
+        for mid, mdata in self.config.modes.items():
+            name = mdata.get("name") if isinstance(mdata, dict) else mdata.name
+            self.p_mode_combo.addItem(name, mid)
+        prof_edit_layout.addRow("Target Mode:", self.p_mode_combo)
+        
+        prof_btns = QHBoxLayout()
+        add_prof_btn = QPushButton("Save Rule")
+        add_prof_btn.clicked.connect(self._save_prof_entry)
+        new_prof_btn = QPushButton("New")
+        new_prof_btn.clicked.connect(self._new_prof_entry)
+        del_prof_btn = QPushButton("Delete")
+        del_prof_btn.clicked.connect(self._delete_prof_entry)
+        
+        prof_btns.addWidget(new_prof_btn)
+        prof_btns.addWidget(add_prof_btn)
+        prof_btns.addWidget(del_prof_btn)
+        prof_edit_layout.addRow(prof_btns)
+        
+        test_btn = QPushButton("Test Detection (Wait 3s)")
+        test_btn.clicked.connect(self._test_detection)
+        prof_edit_layout.addRow("", test_btn)
+        
+        prof_layout.addWidget(prof_editor, stretch=1)
+        
+        self.tabs.addTab(self.profiles_tab, "Profiles")
+        self._refresh_prof_list()
+
         # Buttons
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _on_settings_mode_changed(self, index):
+        if index < 0: return
+        mode_id = self.mode_selector.itemData(index)
+        if mode_id:
+            logger.info(f"Settings: Selected mode {mode_id}")
+            self.config.current_mode = mode_id
+            # We don't save immediately, only on OK? 
+            # Actually, user expects instant switch usually depending on UX.
+            # But SettingsDialog pattern usually implies "Save on OK".
+            # However, for "Current Mode" it might be state vs config.
+            # Let's keep it in config object, saved on accept().
 
     def _on_provider_changed(self, text):
         is_local = (text == "local")
@@ -568,16 +818,31 @@ class SettingsDialog(QDialog):
 
     def _refresh_mode_list(self):
         self.mode_list.clear()
-        self.active_mode_combo.clear()
+        
+        # We also need to refresh the combo on the General tab
+        current_data = self.mode_selector.currentData()
+        self.mode_selector.clear()
         
         for mid, mdata in self.config.modes.items():
             name = mdata.get("name") if isinstance(mdata, dict) else mdata.get("name", mid)
             self.mode_list.addItem(f"{name} ({mid})")
-            self.active_mode_combo.addItem(name, mid)
+            self.mode_selector.addItem(name, mid)
             
-        # Set active
-        index = self.active_mode_combo.findData(self.config.current_mode)
-        if index >= 0: self.active_mode_combo.setCurrentIndex(index)
+        # Restore selection or set to config default
+        target = current_data if current_data else self.config.current_mode
+        
+        found_idx = -1
+        for i in range(self.mode_selector.count()):
+            if str(self.mode_selector.itemData(i)) == str(target):
+                 found_idx = i
+                 break
+        
+        if found_idx >= 0:
+            self.mode_selector.setCurrentIndex(found_idx)
+        else:
+            # Fallback to defaults
+            if self.mode_selector.count() > 0:
+                self.mode_selector.setCurrentIndex(0)
 
     def _on_mode_selected(self, row):
         if row < 0: return
@@ -599,6 +864,10 @@ class SettingsDialog(QDialog):
         index = self.m_action_combo.findText(action)
         self.m_action_combo.setCurrentIndex(index if index >= 0 else 0)
         
+        paste_method = data.get("paste_method", "auto")
+        index = self.m_paste_method.findText(paste_method)
+        self.m_paste_method.setCurrentIndex(index if index >= 0 else 0)
+        
         self.m_path_edit.setText(data.get("file_path") or "")
 
     def _new_mode(self):
@@ -609,6 +878,7 @@ class SettingsDialog(QDialog):
         self.m_path_edit.clear()
         self.m_prompt_combo.setCurrentIndex(0)
         self.m_action_combo.setCurrentIndex(0)
+        self.m_paste_method.setCurrentIndex(0) # Auto
 
     def _save_mode(self):
         mid = self.m_id_edit.text().strip()
@@ -618,6 +888,7 @@ class SettingsDialog(QDialog):
             "name": self.m_name_edit.text(),
             "prompt_id": self.m_prompt_combo.currentData(),
             "output_action": self.m_action_combo.currentText(),
+            "paste_method": self.m_paste_method.currentText(),
             "file_path": self.m_path_edit.text() or None
         }
         
@@ -628,6 +899,16 @@ class SettingsDialog(QDialog):
         if items:
             self.mode_list.setCurrentItem(items[0])
 
+    def _set_active_from_list(self):
+        mid = self.m_id_edit.text().strip()
+        if not mid or mid not in self.config.modes:
+            return
+            
+        index = self.mode_selector.findData(mid)
+        if index >= 0:
+            self.mode_selector.setCurrentIndex(index)
+            QMessageBox.information(self, "Mode Set", f"Active mode set to: {self.config.modes[mid].get('name', mid)}")
+
     def _delete_mode(self):
         mid = self.m_id_edit.text().strip()
         if mid in self.config.modes:
@@ -636,6 +917,16 @@ class SettingsDialog(QDialog):
             self._refresh_mode_list()
 
     def accept(self):
+        # ... (Previous accept logic, make sure to add dict/snp saving if needed? No, logic is in-place)
+        # But wait, config.modes is managed in-place? 
+        # Yes, existing logic for modes/prompts modifies self.config.modes/prompts directly.
+        # Dictionary/Snippets should do the same.
+        
+        # We need to capture changes if we only modified self.config.dictionary/snippets
+        # But wait, self.config is the object from ConfigManager?
+        # Yes. AppConfig object.
+        # So modifications are already in memory.
+        
         self.config.input_device = self.device_combo.currentData()
         self.config.hotkey = self.hotkey_edit.text()
         
@@ -643,11 +934,148 @@ class SettingsDialog(QDialog):
         self.config.api_key = self.api_key_edit.text()
         self.config.remote_model_name = self.remote_model_edit.text()
         self.config.model_preset = self.preset_combo.currentText()
+        self.config.show_visualizer = self.visualizer_check.isChecked()
+        self.config.allow_clipboard_access = self.allow_clipboard_check.isChecked()
+        self.config.paste_delay = self.delay_spin.value()
         
-        self.config.current_mode = self.active_mode_combo.currentData()
-        # Prompts/Modes are modified in-place
+        new_mode = self.mode_selector.currentData()
+        logger.info(f"Settings calling accept. Selected mode: {new_mode}")
+        
+        self.config.current_mode = new_mode
+        # Prompts/Modes/Dict/Snip are modified in-place
         self.config_manager.save()
+        
+        # Verify save
+        logger.info(f"Config saved. Current mode in config: {self.config_manager.get().current_mode}")
+        
         super().accept()
+        
+    # --- Dictionary Helpers ---
+    def _refresh_dict_list(self):
+        self.dict_list.clear()
+        for spoken, written in self.config.dictionary.items():
+            self.dict_list.addItem(f"{spoken} -> {written}")
+
+    def _on_dict_selected(self, row):
+        if row < 0: return
+        item_text = self.dict_list.item(row).text()
+        spoken, written = item_text.split(" -> ", 1)
+        self.d_spoken_edit.setText(spoken)
+        self.d_written_edit.setText(written)
+
+    def _new_dict_entry(self):
+        self.dict_list.clearSelection()
+        self.d_spoken_edit.clear()
+        self.d_written_edit.clear()
+        self.d_spoken_edit.setFocus()
+
+    def _save_dict_entry(self):
+        spoken = self.d_spoken_edit.text().strip()
+        written = self.d_written_edit.text().strip()
+        if not spoken: return
+        
+        self.config.dictionary[spoken] = written
+        self._refresh_dict_list()
+        self._new_dict_entry()
+
+    def _delete_dict_entry(self):
+        spoken = self.d_spoken_edit.text().strip()
+        if spoken in self.config.dictionary:
+            del self.config.dictionary[spoken]
+            self._refresh_dict_list()
+            self._new_dict_entry()
+
+    # --- Snippet Helpers ---
+    def _refresh_snip_list(self):
+        self.snip_list.clear()
+        for trigger, replacement in self.config.snippets.items():
+            short_rep = (replacement[:20] + '..') if len(replacement) > 20 else replacement
+            self.snip_list.addItem(f"{trigger} -> {short_rep}")
+
+    def _on_snip_selected(self, row):
+        if row < 0: return
+        item_text = self.snip_list.item(row).text()
+        trigger = item_text.split(" -> ", 1)[0]
+        
+        if trigger in self.config.snippets:
+            self.s_trigger_edit.setText(trigger)
+            self.s_replace_edit.setPlainText(self.config.snippets[trigger])
+
+    def _new_snip_entry(self):
+        self.snip_list.clearSelection()
+        self.s_trigger_edit.clear()
+        self.s_replace_edit.clear()
+        self.s_trigger_edit.setFocus()
+
+    def _save_snip_entry(self):
+        trigger = self.s_trigger_edit.text().strip()
+        replacement = self.s_replace_edit.toPlainText() # allow newlines
+        if not trigger: return
+        
+        self.config.snippets[trigger] = replacement
+        self._refresh_snip_list()
+        self._new_snip_entry()
+
+    def _delete_snip_entry(self):
+        trigger = self.s_trigger_edit.text().strip()
+        if trigger in self.config.snippets:
+            del self.config.snippets[trigger]
+            self._refresh_snip_list()
+            self._new_snip_entry()
+
+    # --- Profile Helpers ---
+    def _refresh_prof_list(self):
+        self.prof_list.clear()
+        for rule, mode_id in self.config.app_profiles.items():
+            mode_name = mode_id
+            if mode_id in self.config.modes:
+                mdata = self.config.modes[mode_id]
+                mode_name = mdata.get("name") if isinstance(mdata, dict) else mdata.name
+            self.prof_list.addItem(f"{rule} -> {mode_name}")
+
+    def _on_prof_selected(self, row):
+        if row < 0: return
+        item_text = self.prof_list.item(row).text()
+        rule = item_text.split(" -> ", 1)[0]
+        
+        if rule in self.config.app_profiles:
+            self.p_rule_edit.setText(rule)
+            mode_id = self.config.app_profiles[rule]
+            idx = self.p_mode_combo.findData(mode_id)
+            if idx >= 0:
+                self.p_mode_combo.setCurrentIndex(idx)
+
+    def _new_prof_entry(self):
+        self.prof_list.clearSelection()
+        self.p_rule_edit.clear()
+        self.p_rule_edit.setFocus()
+
+    def _save_prof_entry(self):
+        rule = self.p_rule_edit.text().strip()
+        mode_id = self.p_mode_combo.currentData()
+        if not rule or not mode_id: return
+        
+        self.config.app_profiles[rule] = mode_id
+        self._refresh_prof_list()
+        self._new_prof_entry()
+
+    def _delete_prof_entry(self):
+        rule = self.p_rule_edit.text().strip()
+        if rule in self.config.app_profiles:
+            del self.config.app_profiles[rule]
+            self._refresh_prof_list()
+            self._new_prof_entry()
+
+    def _test_detection(self):
+        # Delay 3 seconds to let user switch valid window
+        QTimer.singleShot(3000, self._perform_test_detection)
+        
+    def _perform_test_detection(self):
+        try:
+            detected = self.profile_manager.detect_active_app()
+            QMessageBox.information(self, "Detection Result", f"Detected App Identifier:\n'{detected}'")
+        except Exception as e:
+            QMessageBox.warning(self, "Detection Failed", f"Error: {e}")
 
     def _check_autostart(self):
         autostart_dir = os.path.expanduser("~/.config/autostart")
@@ -684,6 +1112,7 @@ Categories=Utility;
 
 class CommandSignals(QObject):
     trigger = Signal()
+    set_mode = Signal(str)
 
 class SystemTrayApp:
     def __init__(self):
@@ -693,6 +1122,8 @@ class SystemTrayApp:
         self.config_manager = ConfigManager()
         self.history_manager = HistoryManager()
         self.prompt_engine = PromptEngine(self.config_manager)
+        self.text_processor = TextProcessor(self.config_manager, self.prompt_engine)
+        self.profile_manager = ProfileManager(self.config_manager)
         
         self.hotkey_manager = get_manager(self.start_listening, self.config_manager.get().hotkey)
         
@@ -705,8 +1136,11 @@ class SystemTrayApp:
 
         self.command_signals = CommandSignals()
         self.command_signals.trigger.connect(self.start_listening)
+        self.command_signals.set_mode.connect(self.set_mode)
         
-        self.ipc = IPCServer(self.command_signals.trigger.emit)
+        self.sound_manager = SoundManager()
+        
+        self.ipc = IPCServer(self.handle_ipc_command)
         self.ipc.start()
 
         self.setup_menu()
@@ -717,6 +1151,16 @@ class SystemTrayApp:
             self.hotkey_manager.start()
         except NotImplementedError:
             pass
+
+    def handle_ipc_command(self, command):
+        if command == "TOGGLE":
+            self.command_signals.trigger.emit()
+        elif command.startswith("SET_MODE:"):
+            try:
+                mode_id = command.split(":", 1)[1]
+                self.command_signals.set_mode.emit(mode_id)
+            except IndexError:
+                pass
 
     def setup_menu(self):
         self.menu = QMenu()
@@ -768,10 +1212,16 @@ class SystemTrayApp:
 
     def set_mode(self, mode_key):
         logger.info(f"Switching to mode: {mode_key}")
-        config = self.config_manager.get()
-        config.current_mode = mode_key
-        self.config_manager.save()
-        self._refresh_mode_menu()
+        try:
+            config = self.config_manager.get()
+            config.current_mode = mode_key
+            self.config_manager.save()
+            self._refresh_mode_menu()
+            
+            # Show a tooltip/message to confirm
+            self.tray_icon.showMessage("Vocalis", f"Switched to {mode_key} mode", QSystemTrayIcon.Information, 1000)
+        except Exception as e:
+            logger.error(f"Failed to set mode: {e}")
 
     def _refresh_history_menu(self):
         self.history_menu.clear()
@@ -793,6 +1243,7 @@ class SystemTrayApp:
         self.tray_icon.showMessage("Vocalis", "Copied from history!", QSystemTrayIcon.Information, 1000)
 
     def start_listening(self):
+        logger.info(f"start_listening called. Worker: {self.worker}, IsRunning: {self.worker.isRunning() if self.worker else 'None'}")
         if self.worker and self.worker.isRunning():
             self.status_action.setText("Stopping...")
             self.listen_action.setEnabled(False)
@@ -800,6 +1251,21 @@ class SystemTrayApp:
             return
 
         logger.info("Starting listening flow...")
+        
+        # --- Auto-Switch Profile ---
+        try:
+            active_app = self.profile_manager.detect_active_app() # e.g. "Vocalis - VS Code"
+            logger.info(f"Detected Active App: {active_app}")
+            
+            target_mode = self.profile_manager.get_profile(active_app)
+            if target_mode and target_mode != self.config_manager.get().current_mode:
+                logger.info(f"Auto-switching to mode: {target_mode}")
+                self.set_mode(target_mode)
+        except Exception as e:
+            logger.warning(f"Profile switch failed: {e}")
+        # ---------------------------
+
+        self.sound_manager.play_start()
         self.status_action.setText("Starting...") 
         self.listen_action.setText("Stop Listening")
         
@@ -808,13 +1274,23 @@ class SystemTrayApp:
             # Connect stop/cancel buttons
             self.visualizer.stop_clicked.connect(self.start_listening)
             self.visualizer.cancel_clicked.connect(self.cancel_processing)
+            
+        if self.visualizer.isVisible():
+             # Already visible? Maybe implied stop?
+             pass
+        else:
+             self.visualizer.show()
         
-        self.worker = WorkerThread(self.config_manager, self.prompt_engine)
+        # Start Worker
+        self.worker = WorkerThread(self.config_manager, self.prompt_engine, self.text_processor)
+        self.worker.status_update.connect(self.visualizer.set_status)
         self.worker.finished.connect(self.on_transcription_finished)
         self.worker.error.connect(self.on_error)
         self.worker.status_update.connect(self.on_status_update) 
         self.worker.audio_amplitude.connect(self.visualizer.update_audio)
         self.worker.start()
+
+    # start_processing removed as it is merged back into worker
 
     def cancel_processing(self):
         logger.warning("User cancelled processing.")
@@ -829,34 +1305,74 @@ class SystemTrayApp:
         self.tray_icon.showMessage("Vocalis", "Operation Cancelled", QSystemTrayIcon.Information, 1000)
 
     def on_status_update(self, status):
+        config = self.config_manager.get()
         self.status_action.setText(status)
+        
         if "Listening" in status:
             self.listen_action.setEnabled(True)
             self.listen_action.setText("Stop Listening")
-            self.visualizer.set_status(status, mode="recording")
-            self.visualizer.show()
-        else:
+            
+            # Red Icon for Recording
+            self.tray_icon.setIcon(create_placeholder_icon("#E74C3C")) # Red
+            
+            if config.show_visualizer:
+                self.visualizer.set_status(status, mode="recording")
+                self.visualizer.show()
+            else:
+                self.visualizer.hide() # Ensure hidden if previously shown
+                
+        elif "Transcribing" in status or "Processing" in status:
+            if "Transcribing" in status: self.sound_manager.play_stop() # Play stop sound when recording ends
             self.listen_action.setEnabled(False) 
             self.listen_action.setText("Processing...")
-            self.visualizer.set_status(status, mode="processing")
-            self.visualizer.show()
+            
+            # Orange Icon for Processing
+            self.tray_icon.setIcon(create_placeholder_icon("#F39C12")) # Orange
+            
+            if config.show_visualizer:
+                self.visualizer.set_status(status, mode="processing")
+                self.visualizer.show()
+            else:
+                self.visualizer.hide()
+        else:
+            # Reset to Blue (Ready)
+            self.tray_icon.setIcon(create_placeholder_icon("#4A90E2"))
+            self.visualizer.hide()
 
-    def on_transcription_finished(self, text):
+    def on_transcription_finished(self, text, mode_data):
         logger.info(f"Finished: {text}")
+        if text: self.sound_manager.play_success()
+        
+        # Reset UI
         self.status_action.setText("Ready")
+        self.tray_icon.setIcon(create_placeholder_icon("#4A90E2")) # Reset to Blue
         self.listen_action.setText("Start Listening")
         self.listen_action.setEnabled(True)
         if self.visualizer: self.visualizer.hide()
+        # Force process events to ensure window is gone
+        QApplication.processEvents()
         
         # Add to history
         self.history_manager.add(text, self.config_manager.get().current_mode)
         
         self.tray_icon.showMessage("Vocalis", "Transcription Complete", QSystemTrayIcon.Information, 1000)
         
-        # Open Editor (Only if text exists)
-        if text:
-            editor = ResultEditor(text)
-            editor.exec()
+        # Delay output slightly to ensure focus is restored to target app
+        # 500ms should be safer for Wayland/Window switching
+        # Delay output slightly to ensure focus is restored to target app
+        # 500ms should be safer for Wayland/Window switching
+        delay_ms = int(self.config_manager.get().paste_delay * 1000)
+        QTimer.singleShot(delay_ms, lambda: self._perform_output(text, mode_data))
+
+    def _perform_output(self, text, mode_data):
+        output_action_type = mode_data.get("output_action", "clipboard")
+        file_path = mode_data.get("file_path")
+        output_actions.execute(output_action_type, text, file_path=file_path)
+        
+        # Open Editor (Only if text exists and explicitly requested - disabled for seamless flow)
+        # if text:
+        #     editor = ResultEditor(text)
+        #     editor.exec()
 
     def on_error(self, err):
         logger.error(err)

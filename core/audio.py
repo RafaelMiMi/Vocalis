@@ -39,16 +39,14 @@ class AudioRecorder:
                               channels=self.channels, subtype='PCM_16') as file:
                 def callback(indata, frames, time, status):
                     if status:
-                        logger.warning(status)
+                        logger.warning(f"Audio status: {status}")
                     self.audio_queue.put(indata.copy())
 
+                logger.info("Opening InputStream...")
                 with sd.InputStream(samplerate=self.sample_rate, device=self.device_index,
                                     channels=self.channels, callback=callback):
-                    start_time = threading.get_ident() # Just a placeholder, using loop for timing
-                    # Actually we can just loop until stop_event
+                    logger.info("InputStream open. Starting loop.")
                     
-                    # We need to track duration manually if we handle max_duration here,
-                    # but doing it in the loop is easier.
                     import time
                     start_ts = time.time()
                     
@@ -60,11 +58,14 @@ class AudioRecorder:
                             if stream_callback:
                                 stream_callback(data)
                         except queue.Empty:
+                            # Periodic log to show we are alive
+                            # logger.debug("Queue empty...")
                             pass
                         
                         if time.time() - start_ts > max_duration:
                             logger.info("Max duration reached")
                             break
+                    logger.info("Stop event set. Exiting loop.")
                             
         except Exception as e:
             logger.error(f"Recording failed: {e}")

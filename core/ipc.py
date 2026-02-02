@@ -34,8 +34,9 @@ class IPCServer:
                     conn, _ = server.accept()
                     with conn:
                         data = conn.recv(1024)
-                        if data == b"TOGGLE":
-                            self.callback()
+                        if data:
+                            command = data.decode('utf-8')
+                            self.callback(command)
                 except socket.timeout:
                     continue
                 except Exception as e:

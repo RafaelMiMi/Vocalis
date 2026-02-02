@@ -8,14 +8,32 @@ from core.config import ConfigManager
 from core.ipc import send_signal
 from core.audio import AudioRecorder
 
+import socket
+
 # Setup logging
 logging.basicConfig(level=logging.INFO, 
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("Vocalis")
 
+def ensure_single_instance():
+    # Use abstract namespace socket (Linux only) to ensure single instance
+    # The null byte \0 at start indicates abstract namespace
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        sock.bind('\0vocalis_instance_lock')
+        logger.info("Single instance lock acquired.")
+        return sock  # Keep socket open
+    except socket.error as e:
+        logger.error(f"Another instance is already running: {e}")
+        print("Vocalis is already running.")
+        sys.exit(1)
+
 def main():
+
+
     parser = argparse.ArgumentParser(description="Vocalis - Voice to Text Assistant")
     parser.add_argument("--listen", action="store_true", help="Trigger one-shot listening immediately")
+    parser.add_argument("--mode", type=str, help="Switch running instance to specific mode ID")
     parser.add_argument("--record-test", action="store_true", help="Test audio recording only")
     parser.add_argument("--gui", action="store_true", help="Start the GUI/Tray")
     
@@ -31,6 +49,14 @@ def main():
         logger.info(f"Recorded to {path}")
         return
 
+    if args.mode:
+        logger.info(f"Switching mode to '{args.mode}'...")
+        if send_signal(f"SET_MODE:{args.mode}"):
+            logger.info("Signal sent successfully.")
+        else:
+            logger.error("Could not connect to Vocalis. Is the GUI application running?")
+        return
+
     if args.listen:
         # CLI Trigger mode (for Wayland shortcuts)
         logger.info("Sending trigger signal to Vocalis App...")
@@ -44,6 +70,8 @@ def main():
         return
 
     if args.gui:
+        # Check single instance only for GUI
+        sock = ensure_single_instance()
         from app.ui import run_ui
         run_ui()
         return

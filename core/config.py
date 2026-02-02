@@ -10,6 +10,7 @@ class DictationMode:
     name: str
     prompt_id: str = None
     output_action: str = "clipboard" # clipboard, paste, file
+    paste_method: str = "auto" # auto, ctrl_v, type, copy_only
     file_path: str = None # for file output
 
 @dataclass
@@ -37,8 +38,17 @@ class AppConfig:
     
     # Modes & Behavior
     current_mode: str = "quick" # quick, command, note
+    show_visualizer: bool = True
     modes: dict = None # Dict[str, DictationMode]
     prompts: dict = None # Dict[str, Prompt]
+    dictionary: dict = None # Dict[str, str] (Spoken -> Written)
+    snippets: dict = None # Dict[str, str] (Trigger -> Replacement)
+    app_profiles: dict = None # Dict[str, str] (Window Title Substring -> Mode ID)
+    
+    paste_delay: float = 0.5  # Seconds to wait before pasting (allows focus restore)
+
+    # Privacy / Permissions
+    allow_clipboard_access: bool = True
     
     # History
     history_size: int = 20
@@ -48,9 +58,9 @@ class AppConfig:
         # Defaults if None
         if self.modes is None:
             self.modes = {
-                "quick": {"name": "Quick Dictate", "output_action": "paste", "prompt_id": None},
-                "command": {"name": "Command Mode", "output_action": "clipboard", "prompt_id": "command"},
-                "note": {"name": "Note Mode", "output_action": "file", "prompt_id": None, "file_path": "~/Documents/vocalis_notes.md"}
+                "quick": {"name": "Quick Dictate", "output_action": "paste", "paste_method": "auto", "prompt_id": None},
+                "command": {"name": "Command Mode", "output_action": "clipboard", "paste_method": "auto", "prompt_id": "command"},
+                "note": {"name": "Note Mode", "output_action": "file", "paste_method": "auto", "prompt_id": None, "file_path": "~/Documents/vocalis_notes.md"}
             }
         if self.prompts is None:
             self.prompts = {
@@ -59,6 +69,13 @@ class AppConfig:
                 "bullet": {"id": "bullet", "name": "Bullet Points", "description": "Summarize as bullets", "template": "{text}", "system_prompt": "Summarize the following text into concise bullet points."},
                 "clean": {"id": "clean", "name": "Clean Speech", "description": "Remove fillers and fix grammar", "template": "{text}", "system_prompt": "You are a helpful editor. Remove speech fillers (um, ah, like), false starts, and correct basic grammar while preserving the original meaning and tone."}
             }
+        
+        if self.dictionary is None:
+            self.dictionary = {}
+        if self.snippets is None:
+            self.snippets = {}
+        if self.app_profiles is None:
+            self.app_profiles = {}
 
 class ConfigManager:
     def __init__(self):

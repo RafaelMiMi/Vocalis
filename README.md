@@ -24,6 +24,8 @@ Vocalis allows you to dictate text anywhere. It listens to your global hotkey, r
 -   Ubuntu 22.04 or 24.04 (Recommended)
 -   Python 3.10+
 -   `ffmpeg`
+-   `ydotool` (For Wayland auto-typing)
+-   `xdotool` (For X11 auto-paste)
 
 ### Quick Start
  Clone the repository and run the installer:
@@ -44,7 +46,7 @@ Open **Vocalis** from your applications menu. A blue **"V"** icon will appear in
 ### 2. The Hotkey
 -   **Default**: `<Super>+<Shift>+<Space>`
 -   **Action**: Press ONCE to start listening. Press AGAIN to stop.
--   *Wayland Note*: If the default hotkey doesn't work, go to **Settings** -> **General** and follow the instructions to set a system shortcut for `vocalis --listen`.
+-   **Wayland Users (GNOME)**: You **must** create a custom system shortcut to run `vocalis --listen`. See [Troubleshooting](docs/troubleshooting.md).
 
 ### 3. Settings
 Right-click the tray icon and select **Settings** to configure:
