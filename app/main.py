@@ -16,12 +16,34 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger("Vocalis")
 
 def ensure_single_instance():
-    # Use abstract namespace socket (Linux only) to ensure single instance
-    # The null byte \0 at start indicates abstract namespace
+    # Use abstract namespace socket (Linux) or file-based (macOS)
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    
+    if sys.platform == "linux":
+        # Abstract namespace (no file cleanup needed)
+        socket_path = '\0vocalis_instance_lock'
+    else:
+        # File based (macOS/BSD)
+        socket_path = os.path.join(os.path.expanduser("~/.vocalis_lock"))
+        # Clean up stale socket if it exists but connection fails
+        if os.path.exists(socket_path):
+            try:
+                 # Try connecting to see if it's active
+                check_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                check_sock.connect(socket_path)
+                check_sock.close()
+                # If connected, it's alive
+                logger.error("Another instance is already running.")
+                print("Vocalis is already running.")
+                sys.exit(1)
+            except ConnectionRefusedError:
+                # Stale socket, remove it
+                logger.info("Removing stale lock file.")
+                os.unlink(socket_path)
+
     try:
-        sock.bind('\0vocalis_instance_lock')
-        logger.info("Single instance lock acquired.")
+        sock.bind(socket_path)
+        logger.info(f"Single instance lock acquired: {socket_path}")
         return sock  # Keep socket open
     except socket.error as e:
         logger.error(f"Another instance is already running: {e}")

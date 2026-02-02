@@ -4,6 +4,7 @@ import subprocess
 import os
 import time
 import shutil
+import sys
 from abc import ABC, abstractmethod
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,9 @@ class PasteAction(OutputAction):
         
         if session_type == "wayland":
             logger.info(f"Wayland paste requested. Method: {method}")
+            # ... (Wayland logic unchanged)
+            # Shortened for this edit, assuming target content matches exact block to replace
+            # Check logic below.
             
             # Method: Type (ydotool)
             if method == "type" or (method == "auto" and shutil.which("ydotool")):
@@ -57,6 +61,14 @@ class PasteAction(OutputAction):
             # Fallback for Auto
             self._notify("Text copied. Press Ctrl+V (Auto-paste failed).")
             
+        elif sys.platform == "darwin":
+            # macOS
+            if method == "type":
+                self._osascript(f'tell application "System Events" to keystroke "{text}"')
+            else:
+                # Command+V
+                self._osascript('tell application "System Events" to keystroke "v" using command down')
+                
         else:
             # X11 or other
             try:
@@ -70,6 +82,13 @@ class PasteAction(OutputAction):
             except Exception as e:
                 logger.error(f"X11 paste failed: {e}")
                 self._notify("Paste failed. Text in clipboard.")
+
+    def _osascript(self, script):
+        try:
+            subprocess.run(["osascript", "-e", script], check=True)
+        except Exception as e:
+            logger.error(f"osascript failed: {e}")
+            self._notify("Paste failed. Check Accessibility permissions.")
 
     def _try_wtype(self):
         try:

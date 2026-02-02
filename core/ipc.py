@@ -3,9 +3,11 @@ import os
 import threading
 import logging
 
+import tempfile
+
 logger = logging.getLogger(__name__)
 
-SOCKET_PATH = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "vocalis.sock")
+SOCKET_PATH = os.path.join(os.environ.get("XDG_RUNTIME_DIR", tempfile.gettempdir()), "vocalis.sock")
 
 class IPCServer:
     def __init__(self, callback):

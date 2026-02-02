@@ -8,3 +8,4 @@ pyperclip
 python-xlib
 toml
 platformdirs
+pyobjc; sys_platform == 'darwin'

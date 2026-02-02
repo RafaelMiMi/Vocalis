@@ -420,8 +420,8 @@ class SettingsDialog(QDialog):
         self.allow_clipboard_check.setToolTip("Enables {clipboard} placeholder in prompts.")
         general_layout.addRow("", self.allow_clipboard_check)
         
-        # Wayland Warning
-        if os.environ.get("XDG_SESSION_TYPE") == "wayland":
+        # Wayland Warning (Linux only)
+        if sys.platform == "linux" and os.environ.get("XDG_SESSION_TYPE") == "wayland":
             warning = QLabel("Wayland detected: App cannot capture global hotkeys.\nPlease set a system shortcut to run: <b>vocalis --listen</b>")
             warning.setWordWrap(True)
             warning.setStyleSheet("color: orange; font-size: 11px;")

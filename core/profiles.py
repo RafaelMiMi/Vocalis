@@ -1,6 +1,7 @@
 import logging
 import subprocess
 import shutil
+import sys
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +14,16 @@ class ProfileManager:
         Attempts to detect the active application/window title.
         Returns a lowercase string identifier or None.
         """
+        if sys.platform == "darwin":
+             try:
+                 script = 'tell application "System Events" to get name of first application process whose frontmost is true'
+                 res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, check=False)
+                 if res.returncode == 0:
+                     return res.stdout.strip().lower()
+             except Exception:
+                 pass
+             return None
+
         if shutil.which("xdotool"):
             # 1. Try Window Title
             try:
