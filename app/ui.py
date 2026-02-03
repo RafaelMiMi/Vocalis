@@ -1504,6 +1504,9 @@ class SystemTrayApp:
         self.hotkey_manager.stop()
         if self.visualizer: self.visualizer.close()
         self.app.quit()
+        # Force kill to ensure no zombies remain on macOS
+        import os, signal
+        os.kill(os.getpid(), signal.SIGKILL)
 
     def run(self):
         sys.exit(self.app.exec())
