@@ -1119,16 +1119,43 @@ class SystemTrayApp:
         self.app = QApplication(sys.argv)
         self.app.setQuitOnLastWindowClosed(False)
         
+        # On macOS, if we want a Dock icon, we shouldn't act purely as a tray app, 
+        # or we need to ensure the policy is set correctly.
+        # However, typically PySide6 apps show in dock by default unless code explicitly hides it.
+        # The issue described "nothing in tray" -> maybe icon transparency issue?
+        # But "can't see in dock" -> strange for a normal QApplication.
+        
+        # Force Dock Icon (Policy) if needed
+        if sys.platform == 'darwin':
+             self.app.setApplicationName("Vocalis")
+             # This policy ensures it appears in Dock
+             self.app.setApplicationDisplayName("Vocalis")
+
         self.config_manager = ConfigManager()
         self.history_manager = HistoryManager()
         self.prompt_engine = PromptEngine(self.config_manager)
         self.text_processor = TextProcessor(self.config_manager, self.prompt_engine)
         self.profile_manager = ProfileManager(self.config_manager)
         
+        # Initialize Audio Manager for Sounds
+        from core.sounds import SoundManager
+        self.sound_manager = SoundManager()
+        
         self.hotkey_manager = get_manager(self.start_listening, self.config_manager.get().hotkey)
         
-        self.tray_icon = QSystemTrayIcon()
-        self.tray_icon.setIcon(create_placeholder_icon())
+        self.tray_icon = QSystemTrayIcon(self.app)
+        
+        # Set Icon
+        # Use a programmatic icon if file not found
+        icon_path = os.path.join(os.path.dirname(__file__), "../resources/icon.png")
+        if os.path.exists(icon_path):
+             self.tray_icon.setIcon(QIcon(icon_path))
+             self.app.setWindowIcon(QIcon(icon_path))
+        else:
+             self.tray_icon.setIcon(create_placeholder_icon())
+             self.app.setWindowIcon(create_placeholder_icon())
+        
+        self.tray_icon.setVisible(True)
         self.tray_icon.setToolTip("Vocalis")
         
         self.worker = None
