@@ -29,7 +29,14 @@ cd "$INSTALL_DIR"
 python3 -m venv venv
 ./venv/bin/pip install --upgrade pip
 ./venv/bin/pip install "Cython<3.0" setuptools wheel
+
+# Install PyAV with NO build isolation to ensure it uses our Cython 0.29
+# AND install faster-whisper manually to ensure it doesn't trigger a re-build of av
 ./venv/bin/pip install --no-build-isolation "av>=12.0.0"
+./venv/bin/pip install "faster-whisper" --no-deps
+
+# Install remaining requirements
+./venv/bin/pip install -r requirements.txt
 ./venv/bin/pip install -r requirements.txt
 
 # 3. Create Launcher Script
