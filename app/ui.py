@@ -65,7 +65,10 @@ class VisualizerWindow(QWidget):
         self.mode = "recording" # recording or processing
         
         screen = QApplication.primaryScreen().geometry()
-        self.move(screen.width() // 2 - 150, screen.height() - 200)
+        # Center horizontally, but place at bottom (minus padding)
+        x = screen.x() + (screen.width() - 300) // 2
+        y = screen.y() + (screen.height() - 150)
+        self.move(x, y)
 
         # Action Button (Stop/Cancel)
         self.action_btn = QPushButton("Stop", self)
@@ -311,41 +314,30 @@ class HotkeyEdit(QLineEdit):
         key = event.key()
         modifiers = event.modifiers()
         
-        # If just a modifier is pressed, don't update yet (or show pending?)
-        # But we want to show the full combo.
-        
-        # Check for clear command (Backspace used to clear)
-        if key == Qt.Key_Backspace:
+        if key == Qt.Key_Backspace or key == Qt.Key_Delete:
             self.clear()
+            self.setText("")
             return
-            
+
+        # Ignore standalone modifiers (Pressing just Ctrl shouldn't set the hotkey yet)
+        if key in [Qt.Key_Control, Qt.Key_Shift, Qt.Key_Alt, Qt.Key_Meta]:
+            return
+
+        # Build string
         parts = []
-        if modifiers & Qt.ControlModifier:
-            parts.append("<ctrl>")
-        if modifiers & Qt.AltModifier:
-            parts.append("<alt>")
-        if modifiers & Qt.ShiftModifier:
-            parts.append("<shift>")
-        if modifiers & Qt.MetaModifier:
-            parts.append("<super>")
+        if modifiers & Qt.MetaModifier: parts.append("<super>")
+        if modifiers & Qt.ControlModifier: parts.append("<ctrl>")
+        if modifiers & Qt.AltModifier: parts.append("<alt>")
+        if modifiers & Qt.ShiftModifier: parts.append("<shift>")
+        
+        # Get Key Name
+        key_seq = QKeySequence(key).toString()
+        if key_seq:
+            parts.append(key_seq.lower())
             
-        # Filter out modifier-only key events
-        if key not in [Qt.Key_Control, Qt.Key_Shift, Qt.Key_Alt, Qt.Key_Meta]:
-            # Convert Qt key to reasonable string
-            # QKeySequence return strings like "Space", "F1", "A"
-            key_seq = QKeySequence(key).toString().lower()
-            if key_seq == "space": parts.append("space") # pynput prefers lowercase
-            elif key_seq: parts.append(key_seq)
-            else:
-                 # Fallback for some keys if empty
-                 pass
-                 
         if parts:
-            if len(parts) == 1 and parts[0] in ["<ctrl>", "<alt>", "<shift>", "<super>"]:
-                # Just modifier, maybe don't set text yet? Or show it?
-                # showing it is better feedback
-                pass
-            self.setText("+".join(parts))
+            final_key = "+".join(parts)
+            self.setText(final_key)
 
 
 
