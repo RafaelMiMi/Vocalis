@@ -1130,13 +1130,41 @@ class SystemTrayApp:
              self.app.setApplicationName("Vocalis")
              self.app.setApplicationDisplayName("Vocalis")
         
-        # 1. Force a hidden main window to ensure Dock/Menu bar integration works on macOS
-        # QSystemTrayIcon with no window can be weird on macOS regarding menus.
+        # 1. Main Control Window (Visible on macOS to ensure accessibility)
         from PySide6.QtWidgets import QMainWindow
         self.main_window = QMainWindow()
-        self.main_window.setWindowTitle("Vocalis")
-        self.main_window.resize(0,0) # Keep small/hidden initially
-        # We don't show it yet, but having it helps anchor menus.
+        self.main_window.setWindowTitle("Vocalis Control")
+        self.main_window.resize(300, 150)
+        
+        # Simple Central Widget
+        central = QWidget()
+        self.main_window.setCentralWidget(central)
+        layout = QVBoxLayout(central)
+        
+        self.status_label = QLabel("Vocalis is Ready")
+        self.status_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.status_label)
+        
+        btn_settings = QPushButton("Settings")
+        btn_settings.clicked.connect(self.open_settings)
+        layout.addWidget(btn_settings)
+        
+        btn_min = QPushButton("Hide to Dock/Tray")
+        btn_min.clicked.connect(self.main_window.hide)
+        layout.addWidget(btn_min)
+        
+        btn_quit = QPushButton("Quit")
+        btn_quit.clicked.connect(self.quit_app)
+        layout.addWidget(btn_quit)
+        
+        # Center on screen
+        screen = QApplication.primaryScreen().geometry()
+        self.main_window.move(
+            screen.x() + (screen.width() - 300) // 2,
+            screen.y() + (screen.height() - 150) // 2
+        )
+        # Show immediately so user has control
+        self.main_window.show()
 
         self.config_manager = ConfigManager()
         self.history_manager = HistoryManager()
