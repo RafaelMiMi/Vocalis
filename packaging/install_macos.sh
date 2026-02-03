@@ -3,6 +3,15 @@ set -e
 
 echo "Installing Vocalis for macOS..."
 
+# Check for Homebrew
+if ! command -v brew &> /dev/null; then
+    echo "Error: Homebrew is not installed. Please install Homebrew first: https://brew.sh/"
+    exit 1
+fi
+
+echo "Installing system dependencies (ffmpeg, pkg-config)..."
+brew install ffmpeg pkg-config
+
 INSTALL_DIR="$HOME/.local/share/vocalis"
 BIN_DIR="$HOME/.local/bin"
 
