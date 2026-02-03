@@ -1,5 +1,5 @@
 # faster-whisper (installed manually in script)
-av>=12.0.0
+# av>=12.0.0 (installed manually in script)
 PySide6
 sounddevice
 soundfile
