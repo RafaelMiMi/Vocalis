@@ -261,10 +261,18 @@ class WorkerThread(QThread):
             # Check if stop was pressed during init
             if self._should_stop_recording:
                 logger.info("Stop flag set during init, aborting.")
+                self.recorder.stop() # Ensure it knows it's stopped
                 self.finished.emit("", mode_data)
                 return
 
             logger.info("Starting record_once...")
+            # We need to act on self._should_stop_recording if it flips AFTER we start recording but BEFORE we enter the loop?
+            # record_once blocks. We rely on stop_recording() calling self.recorder.stop() from the MAIN thread.
+            # But there is a race: if stop_recording is called while we are in AudioRecorder.__init__ or just before record_once.
+            
+            # Since record_once is blocking, the other thread calls recorder.stop(). 
+            # We just need to ensure self.recorder is reachable. It is assigned above.
+            
             path = self.recorder.record_once(max_duration=3600, stream_callback=stream_callback)
             logger.info(f"record_once returned: {path}")
             
