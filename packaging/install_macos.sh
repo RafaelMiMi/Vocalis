@@ -37,7 +37,7 @@ python3 -m venv venv
 
 # Install remaining requirements
 ./venv/bin/pip install -r requirements.txt
-./venv/bin/pip install -r requirements.txt
+
 
 # 3. Create Launcher Script
 echo "Creating launcher..."
