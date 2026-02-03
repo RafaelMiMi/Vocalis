@@ -277,7 +277,20 @@ class WorkerThread(QThread):
             logger.info(f"record_once returned: {path}")
             
             if not path or not os.path.exists(path):
+                logger.error("Recording failed: no file created.")
+                self.error.emit("Recording failed. Check microphone.")
                 self.finished.emit("", mode_data)
+                return
+
+            file_size = os.path.getsize(path)
+            logger.info(f"Recorded file size: {file_size} bytes")
+            if file_size < 1000: # Less than 1KB is basically empty/header only
+                logger.warning("Recorded audio is too short or empty. Check microphone permissions.")
+                # We can try to transcribe, but it will likely be empty.
+                # Use a specific error signal?
+                self.error.emit("No audio recorded. Please check Mic permissions.")
+                self.finished.emit("", mode_data)
+                if os.path.exists(path): os.unlink(path)
                 return
 
             # 2. Transcribe
