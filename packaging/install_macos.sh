@@ -37,7 +37,7 @@ python3 -m venv venv
 
 # Install remaining requirements
 # ./venv/bin/pip install -r requirements.txt
-./venv/bin/pip install PySide6 sounddevice soundfile numpy pynput pyperclip python-xlib toml platformdirs openai anthropic
+./venv/bin/pip install PySide6 sounddevice soundfile numpy pynput pyperclip python-xlib toml platformdirs openai anthropic ctranslate2 tokenizers
 # Only install pyobjc on mac
 ./venv/bin/pip install pyobjc
 
