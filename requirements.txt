@@ -10,3 +10,4 @@ python-xlib
 toml
 platformdirs
 pyobjc; sys_platform == 'darwin'
+Cython<3.0
