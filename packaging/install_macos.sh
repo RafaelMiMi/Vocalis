@@ -59,6 +59,17 @@ if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
     echo 'export PATH="$HOME/.local/bin:$PATH"'
 fi
 
+# 4. Create macOS Application Bundle
+echo "Creating macOS Application..."
+APP_PATH="$HOME/Applications/Vocalis.app"
+mkdir -p "$HOME/Applications"
+
+# Create a simple Automator/AppleScript app wrapper
+osacompile -o "$APP_PATH" -e "do shell script \"$BIN_DIR/vocalis --gui > /dev/null 2>&1 &\""
+
+# Set a custom icon if we had one, for now default is fine
+echo "App created at $APP_PATH"
+
 echo "------------------------------------------------"
 echo "Vocalis installed successfully!"
 echo "------------------------------------------------"
