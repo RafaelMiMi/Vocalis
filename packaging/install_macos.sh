@@ -36,7 +36,10 @@ python3 -m venv venv
 ./venv/bin/pip install "faster-whisper" --no-deps
 
 # Install remaining requirements
-./venv/bin/pip install -r requirements.txt
+# ./venv/bin/pip install -r requirements.txt
+./venv/bin/pip install PySide6 sounddevice soundfile numpy pynput pyperclip python-xlib toml platformdirs openai anthropic
+# Only install pyobjc on mac
+./venv/bin/pip install pyobjc
 
 
 # 3. Create Launcher Script
