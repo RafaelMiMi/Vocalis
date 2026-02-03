@@ -24,7 +24,7 @@ class Prompt:
 @dataclass
 class AppConfig:
     # ASR Settings
-    transcription_provider: str = "local" # local, openai, groq
+    transcription_provider: str = "local" # local, openai, groq, deepseek, glm, claude
     api_key: str = None
     model_preset: str = "balanced" # fast, balanced, high_quality
     model_size: str = "small" # Derived or manual override (local)
