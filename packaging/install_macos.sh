@@ -28,6 +28,7 @@ echo "Setting up virtual environment..."
 cd "$INSTALL_DIR"
 python3 -m venv venv
 ./venv/bin/pip install --upgrade pip
+./venv/bin/pip install "Cython<3.0"
 ./venv/bin/pip install -r requirements.txt
 
 # 3. Create Launcher Script
