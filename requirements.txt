@@ -1,4 +1,5 @@
 faster-whisper
+av>=12.0.0
 PySide6
 sounddevice
 soundfile
