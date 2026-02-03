@@ -1145,6 +1145,12 @@ class SystemTrayApp:
         self.status_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.status_label)
         
+        # Add explicit Start/Stop button for manual control
+        self.btn_toggle = QPushButton("Start Listening")
+        self.btn_toggle.setStyleSheet("background-color: #4A90E2; color: white; font-size: 14px; font-weight: bold; padding: 10px;")
+        self.btn_toggle.clicked.connect(self.start_listening)
+        layout.addWidget(self.btn_toggle)
+        
         btn_settings = QPushButton("Settings")
         btn_settings.clicked.connect(self.open_settings)
         layout.addWidget(btn_settings)
@@ -1376,10 +1382,19 @@ class SystemTrayApp:
         config = self.config_manager.get()
         self.status_action.setText(status)
         
+        # Update Main Window UI
+        if hasattr(self, 'status_label'):
+             self.status_label.setText(status)
+        
         if "Listening" in status:
             self.listen_action.setEnabled(True)
             self.listen_action.setText("Stop Listening")
             
+            # Update Button
+            if hasattr(self, 'btn_toggle'):
+                self.btn_toggle.setText("Stop Listening")
+                self.btn_toggle.setStyleSheet("background-color: #E74C3C; color: white; font-size: 14px; font-weight: bold; padding: 10px;")
+
             # Red Icon for Recording
             self.tray_icon.setIcon(create_placeholder_icon("#E74C3C")) # Red
             
@@ -1394,6 +1409,12 @@ class SystemTrayApp:
             self.listen_action.setEnabled(False) 
             self.listen_action.setText("Processing...")
             
+            # Update Button
+            if hasattr(self, 'btn_toggle'):
+                self.btn_toggle.setText("Processing...")
+                self.btn_toggle.setEnabled(False)
+                self.btn_toggle.setStyleSheet("background-color: #F39C12; color: white; font-size: 14px; font-weight: bold; padding: 10px;")
+
             # Orange Icon for Processing
             self.tray_icon.setIcon(create_placeholder_icon("#F39C12")) # Orange
             
@@ -1406,6 +1427,12 @@ class SystemTrayApp:
             # Reset to Blue (Ready)
             self.tray_icon.setIcon(create_placeholder_icon("#4A90E2"))
             self.visualizer.hide()
+            
+            # Reset Button
+            if hasattr(self, 'btn_toggle'):
+                self.btn_toggle.setText("Start Listening")
+                self.btn_toggle.setEnabled(True)
+                self.btn_toggle.setStyleSheet("background-color: #4A90E2; color: white; font-size: 14px; font-weight: bold; padding: 10px;")
 
     def on_transcription_finished(self, text, mode_data):
         logger.info(f"Finished: {text}")
