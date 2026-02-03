@@ -1128,8 +1128,15 @@ class SystemTrayApp:
         # Force Dock Icon (Policy) if needed
         if sys.platform == 'darwin':
              self.app.setApplicationName("Vocalis")
-             # This policy ensures it appears in Dock
              self.app.setApplicationDisplayName("Vocalis")
+        
+        # 1. Force a hidden main window to ensure Dock/Menu bar integration works on macOS
+        # QSystemTrayIcon with no window can be weird on macOS regarding menus.
+        from PySide6.QtWidgets import QMainWindow
+        self.main_window = QMainWindow()
+        self.main_window.setWindowTitle("Vocalis")
+        self.main_window.resize(0,0) # Keep small/hidden initially
+        # We don't show it yet, but having it helps anchor menus.
 
         self.config_manager = ConfigManager()
         self.history_manager = HistoryManager()
@@ -1141,7 +1148,13 @@ class SystemTrayApp:
         from core.sounds import SoundManager
         self.sound_manager = SoundManager()
         
-        self.hotkey_manager = get_manager(self.start_listening, self.config_manager.get().hotkey)
+        try:
+            self.hotkey_manager = get_manager(self.start_listening, self.config_manager.get().hotkey)
+        except Exception as e:
+            logger.error(f"Failed initial hotkey bind: {e}")
+            self.hotkey_manager = get_manager(self.start_listening, None) # Dummy manager
+            # We will force open settings later if this happens
+            QTimer.singleShot(1000, self.open_settings)
         
         self.tray_icon = QSystemTrayIcon(self.app)
         
