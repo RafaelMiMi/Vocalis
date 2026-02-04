@@ -1457,6 +1457,17 @@ class SystemTrayApp:
         self.listen_action.setText("Start Listening")
         self.listen_action.setEnabled(True)
         if self.visualizer: self.visualizer.hide()
+        
+        # If the main window is active, hide/minimize it to restore focus to the user's previous app
+        # This is critical for auto-paste to work (otherwise we paste into ourself).
+        if hasattr(self, 'main_window') and self.main_window.isVisible():
+            if self.main_window.isActiveWindow():
+                 self.main_window.showMinimized() 
+                 # Or just hide? Hide is better for tray apps, but we are a 'window' app now.
+                 # Minimize ensures we don't just disappear if the user is confused.
+                 # But pure hide usually restores focus faster.
+                 # Let's try minimize for clarity.
+
         # Force process events to ensure window is gone
         QApplication.processEvents()
         
@@ -1467,9 +1478,10 @@ class SystemTrayApp:
         
         # Delay output slightly to ensure focus is restored to target app
         # 500ms should be safer for Wayland/Window switching
-        # Delay output slightly to ensure focus is restored to target app
-        # 500ms should be safer for Wayland/Window switching
         delay_ms = int(self.config_manager.get().paste_delay * 1000)
+        # Ensure at least 500ms if we just minimized a window
+        if delay_ms < 500: delay_ms = 500
+        
         QTimer.singleShot(delay_ms, lambda: self._perform_output(text, mode_data))
 
     def _perform_output(self, text, mode_data):
