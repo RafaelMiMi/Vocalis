@@ -161,7 +161,22 @@ systemctl --user start vocalis.service
 echo "------------------------------------------------"
 echo "Vocalis installed successfully!"
 echo "------------------------------------------------"
+
+# Check for input group permissions (crucial for evdev/hotkeys)
+if ! groups | grep -q "\binput\b"; then
+    echo "WARNING: Your user is NOT in the 'input' group."
+    echo "This is required for detecting global hotkeys (evdev)."
+    read -p "Add user '$USER' to 'input' group now? [Y/n] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ || -z $REPLY ]]; then
+        sudo usermod -aG input "$USER"
+        echo "MARKED FOR RESTART: You must LOG OUT and LOG BACK IN for this to take effect!"
+    else
+        echo "Warning: Hotkeys may not work until you fix permissions."
+    fi
+fi
+
 echo "1. Run 'vocalis --gui' to start the tray."
-echo "2. Setup your Wayland hotkey (see docs/wayland.md)."
+echo "2. If you are on Wayland, you MUST set a custom system shortcut."
 echo "   Command: vocalis --listen"
 echo "------------------------------------------------"
