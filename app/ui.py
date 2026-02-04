@@ -1520,9 +1520,11 @@ class SystemTrayApp:
         self.hotkey_manager.stop()
         if self.visualizer: self.visualizer.close()
         self.app.quit()
+        
         # Force kill to ensure no zombies remain on macOS
-        import os, signal
-        os.kill(os.getpid(), signal.SIGKILL)
+        if sys.platform == 'darwin':
+            import os, signal
+            os.kill(os.getpid(), signal.SIGKILL)
 
     def apply_theme(self):
         # Force Fusion style for consistent look across platforms
