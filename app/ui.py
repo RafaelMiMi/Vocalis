@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (QApplication, QSystemTrayIcon, QMenu, QDialog,
                                QTabWidget, QTextEdit, QListWidget, QPushButton, QHBoxLayout,
                                QMessageBox, QDoubleSpinBox)
 from PySide6.QtGui import (QIcon, QAction, QPainter, QColor, QPen, QPainterPath, 
-                         QKeySequence, QFont, QPixmap)
+                         QKeySequence, QFont, QPixmap, QPalette)
 from PySide6.QtCore import Slot, QThread, Signal, Qt, QTimer, QPoint, QObject
 from core.config import ConfigManager, AppConfig
 from core.audio import AudioRecorder
