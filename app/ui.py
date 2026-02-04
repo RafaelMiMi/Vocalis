@@ -400,10 +400,8 @@ class SettingsDialog(QDialog):
         self.mode_selector.currentIndexChanged.connect(self._on_settings_mode_changed)
         general_layout.addRow("Active Mode:", self.mode_selector)
 
-        self.hotkey_edit = QLineEdit(self.config.hotkey)
+        self.hotkey_edit = HotkeyEdit(self.config.hotkey)
         self.hotkey_edit.setPlaceholderText("Click to set (e.g. <Super>space)")
-        self.hotkey_edit.setReadOnly(True) # Capture key presses
-        self.hotkey_edit.installEventFilter(self) # We need to implement eventFilter
         
         general_layout.addRow("Global Hotkey:", self.hotkey_edit)
 
@@ -1141,7 +1139,10 @@ class SystemTrayApp:
         # Force Dock Icon (Policy) if needed
         if sys.platform == 'darwin':
              self.app.setApplicationName("Vocalis")
+             self.app.setApplicationName("Vocalis")
              self.app.setApplicationDisplayName("Vocalis")
+
+        self.apply_theme()
         
         # 1. Main Control Window (Visible on macOS to ensure accessibility)
         from PySide6.QtWidgets import QMainWindow
@@ -1182,8 +1183,11 @@ class SystemTrayApp:
             screen.x() + (screen.width() - 300) // 2,
             screen.y() + (screen.height() - 150) // 2
         )
-        # Show immediately so user has control
-        self.main_window.show()
+        # Connect toggle button
+        self.btn_toggle.clicked.connect(self.start_listening)
+        
+        # Show only if requested (e.g. first run or config option), otherwise start in tray
+        # self.main_window.show()
 
         self.config_manager = ConfigManager()
         self.history_manager = HistoryManager()
@@ -1519,6 +1523,93 @@ class SystemTrayApp:
         # Force kill to ensure no zombies remain on macOS
         import os, signal
         os.kill(os.getpid(), signal.SIGKILL)
+
+    def apply_theme(self):
+        # Force Fusion style for consistent look across platforms
+        self.app.setStyle("Fusion")
+        
+        # Dark Palette
+        dark_palette = QPalette()
+        dark_color = QColor(45, 45, 45)
+        disabled_color = QColor(127, 127, 127)
+        
+        dark_palette.setColor(QPalette.Window, dark_color)
+        dark_palette.setColor(QPalette.WindowText, Qt.white)
+        dark_palette.setColor(QPalette.Base, QColor(25, 25, 25))
+        dark_palette.setColor(QPalette.AlternateBase, dark_color)
+        dark_palette.setColor(QPalette.ToolTipBase, Qt.white)
+        dark_palette.setColor(QPalette.ToolTipText, Qt.white)
+        dark_palette.setColor(QPalette.Text, Qt.white)
+        dark_palette.setColor(QPalette.Button, dark_color)
+        dark_palette.setColor(QPalette.ButtonText, Qt.white)
+        dark_palette.setColor(QPalette.BrightText, Qt.red)
+        dark_palette.setColor(QPalette.Link, QColor(42, 130, 218))
+        dark_palette.setColor(QPalette.Highlight, QColor(42, 130, 218))
+        dark_palette.setColor(QPalette.HighlightedText, Qt.black)
+        
+        self.app.setPalette(dark_palette)
+        
+        # Additional Stylesheet for specific controls
+        self.app.setStyleSheet("""
+            QToolTip { 
+                color: #ffffff; 
+                background-color: #2a82da; 
+                border: 1px solid white; 
+            }
+            QDialog, QMainWindow {
+                background-color: #2D2D2D;
+            }
+            QLabel {
+                color: #E0E0E0;
+            }
+            QLineEdit, QTextEdit, QListWidget {
+                background-color: #1A1A1A;
+                color: #F0F0F0;
+                border: 1px solid #3D3D3D;
+                border-radius: 4px;
+                padding: 4px;
+            }
+            QLineEdit:focus, QTextEdit:focus {
+                border: 1px solid #4A90E2;
+            }
+            QPushButton {
+                background-color: #3D3D3D;
+                color: #E0E0E0;
+                border: 1px solid #555;
+                border-radius: 4px;
+                padding: 5px 15px;
+            }
+            QPushButton:hover {
+                background-color: #4D4D4D;
+            }
+            QPushButton:pressed {
+                background-color: #2D2D2D;
+            }
+            QTabWidget::pane {
+                border: 1px solid #3D3D3D;
+            }
+            QTabBar::tab {
+                background: #2D2D2D;
+                color: #A0A0A0;
+                padding: 8px 12px;
+                border: 1px solid #3D3D3D;
+                margin-right: 2px;
+            }
+            QTabBar::tab:selected {
+                background: #3D3D3D;
+                color: #FFFFFF;
+                border-bottom: 2px solid #4A90E2;
+            }
+            QComboBox {
+                background: #1A1A1A;
+                color: #F0F0F0;
+                border: 1px solid #3D3D3D;
+                padding: 4px;
+            }
+            QComboBox::drop-down {
+                border: none;
+            }
+        """)
 
     def run(self):
         sys.exit(self.app.exec())
